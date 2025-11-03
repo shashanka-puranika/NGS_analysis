@@ -1,0 +1,115 @@
+mounting external disk
+lsblk
+sudo mount -t ntfs /dev/sde1 /home/krypton/RNASEq
+
+#Rawdata
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/003/SRR4420293/SRR4420293_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/003/SRR4420293/SRR4420293_2.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/004/SRR4420294/SRR4420294_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/004/SRR4420294/SRR4420294_2.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/007/SRR4420297/SRR4420297_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/007/SRR4420297/SRR4420297_2.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/008/SRR4420298/SRR4420298_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/008/SRR4420298/SRR4420298_2.fastq.gz
+wget http://genomedata.org/pmbio-workshop/references/transcriptome/$CHRS/ref_transcriptome.gtf
+wget http://genomedata.org/pmbio-workshop/references/transcriptome/$CHRS/ref_transcriptome.fa
+wget -c http://genomedata.org/pmbio-workshop/fastqs/$CHRS/RNAseq_Norm.tar
+wget -c http://genomedata.org/pmbio-workshop/fastqs/$CHRS/RNAseq_Tumor.tar
+
+#Quality check
+
+cd rawdata
+mkdir qc
+fastqc *.fastq.gz -o qc/ -t 4
+#multiqc
+go to the runned fastqc files and the run the below command
+
+multiqc .
+
+cd qc
+ls
+mkdir post_trim
+fastqc *_paired.fq.gz -o qc/post_trim/ -t 4
+rmdir post_trim
+cd ..
+ls
+cd trimmed
+mkdir post_trim
+fastqc *_paired.fq.gz -o qc/post_trim/ -t 4
+fastqc *_paired.fq.gz -o post_trim/ -t 4
+
+#Trimming
+Make this in the rawdata
+mkdir trimmed
+
+trimmomatic PE -threads 4 SRR4420294_1.fastq.gz SRR4420294_2.fastq.gz trimmed/SRR4420294_1_paired.fq.gz trimmed/SRR4420294_1_unpaired.fq.gz trimmed/SRR4420294_2_paired.fq.gz trimmed/SRR4420294_2_unpaired.fq.gz ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 SRR4420293_1.fastq.gz SRR4420293_2.fastq.gz trimmed/SRR4420293_1_paired.fq.gz trimmed/SRR4420293_1_unpaired.fq.gz trimmed/SRR4420293_2_paired.fq.gz trimmed/SRR4420293_2_unpaired.fq.gz ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 SRR4420297_1.fastq.gz SRR4420297_2.fastq.gz trimmed/SRR4420297_1_paired.fq.gz trimmed/SRR4420297_1_unpaired.fq.gz trimmed/SRR4420297_2_paired.fq.gz trimmed/SRR4420297_2_unpaired.fq.gz ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 SRR4420298_1.fastq.gz SRR4420298_2.fastq.gz trimmed/SRR4420298_1_paired.fq.gz trimmed/SRR4420298_1_unpaired.fq.gz trimmed/SRR4420298_2_paired.fq.gz trimmed/SRR4420298_2_unpaired.fq.gz ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+#sam file
+
+gunzip GCF_000001735.4_TAIR10.1_genomic.fna.gz\ngunzip GCF_000001735.4_TAIR10.1_genomic.gff.gz
+mkdir arabidopsis_index
+hisat2-build GCF_000001735.4_TAIR10.1_genomic.fna arabidopsis_index
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420293_1_paired.fq.gz -2 trimmed/SRR4420293_2_paired.fq.gz -S trimmed/alignment/SRR4420293.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420294_1_paired.fq.gz -2 trimmed/SRR4420294_2_paired.fq.gz -S trimmed/alignment/SRR4420294.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420297_1_paired.fq.gz -2 trimmed/SRR4420297_2_paired.fq.gz -S trimmed/alignment/SRR4420297.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420298_1_paired.fq.gz -2 trimmed/SRR4420298_2_paired.fq.gz -S trimmed/alignment/SRR4420298.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420293_1_unpaired.fq.gz -2 trimmed/SRR4420293_2_unpaired.fq.gz -S trimmed/alignment/SRR4420293_un.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420294_1_unpaired.fq.gz -2 trimmed/SRR4420294_2_unpaired.fq.gz -S trimmed/alignment/SRR4420294_un.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420297_1_unpaired.fq.gz -2 trimmed/SRR4420297_2_unpaired.fq.gz -S trimmed/alignment/SRR4420297_un.sam
+
+hisat2 -p 4 -x reference/arabidopsis_index -1 trimmed/SRR4420298_1_unpaired.fq.gz -2 trimmed/SRR4420298_2_unpaired.fq.gz -S trimmed/alignment/SRR4420298_un.sam
+
+
+
+
+
+cd qc
+ls
+mkdir post_trim
+fastqc *_paired.fq.gz -o qc/post_trim/ -t 4
+rmdir post_trim
+cd ..
+ls
+cd trimmed
+mkdir post_trim
+fastqc *_paired.fq.gz -o qc/post_trim/ -t 4
+fastqc *_paired.fq.gz -o post_trim/ -t 4
+ls
+cd ..
+ls
+cd ..
+ls
+cd reference
+ls
+export CHRS='chr6_and_chr17'
+export GATK_REGIONS='-L chr17'
+wget http://genomedata.org/pmbio-workshop/references/genome/$CHRS/ref_genome.tar
+tar -xvf ref_genome.tar
+rm -f ref_genome.tar
+gunzip ref_genome.fa.gz
+wget http://genomedata.org/pmbio-workshop/references/transcriptome/$CHRS/ref_transcriptome.gtf
+wget http://genomedata.org/pmbio-workshop/references/transcriptome/$CHRS/ref_transcriptome.fa
+wget -c http://genomedata.org/pmbio-workshop/fastqs/$CHRS/RNAseq_Norm.tar
+wget -c http://genomedata.org/pmbio-workshop/fastqs/$CHRS/RNAseq_Tumor.tar
+ls
+gunzip GCF_000001735.4_TAIR10.1_genomic.fna.gz\ngunzip GCF_000001735.4_TAIR10.1_genomic.gff.gz
+mkdir arabidopsis_index
+hisat2-build GCF_000001735.4_TAIR10.1_genomic.fna arabidopsis_index
+ls
+cd ..
+ls
+cd rawdata
+ls
