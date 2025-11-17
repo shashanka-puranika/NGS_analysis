@@ -10,7 +10,7 @@ head(counts)
 
 # 3ï¸âƒ£ Define your groups (adjust according to your samples)
 # Example: first 3 samples = Control, next 3 = Treatment
-group <- factor(c("Control", "Control", "Control", "Treatment", "Treatment", "Treatment"))
+group <- factor(c("Control", "Control","Treatment", "Treatment"))
 
 # 4ï¸âƒ£ Create DGEList
 dge <- DGEList(counts = counts, group = group)
