@@ -2,7 +2,7 @@
 # edgeR full analysis + QC plots using design.txt
 # Author: Shashanka Puranika K
 # Date: 24-11-2025
-# Modifications: replaced EnhancedVolcano usage with ggplot2/ggrepel/plotly volcano plotting
+# Modifications: replaced plotly interactive volcano with ggiraph-based interactive volcano
 #############################################
 
 # --------- Config ---------
@@ -21,7 +21,7 @@ use_voom <- FALSE
 # Volcano plot parameters
 volcano_pCutoff <- 0.05
 volcano_FCcutoff <- 1
-volcano_top_n_labels <- 10   # number of genes to label on the static volcano
+volcano_top_n_labels <- 10   # number of genes to label on the static volcano and interactive
 
 # --------- Helpers ---------
 install_if_missing <- function(pkgs) {
@@ -33,14 +33,14 @@ install_if_missing <- function(pkgs) {
 }
 
 # Install/load packages
-install_if_missing(c("edgeR", "pheatmap", "limma", "ggplot2", "ggrepel", "plotly", "htmlwidgets", "viridis", "dplyr"))
+install_if_missing(c("edgeR", "pheatmap", "limma", "ggplot2", "ggrepel", "ggiraph", "htmlwidgets", "viridis", "dplyr"))
 suppressPackageStartupMessages({
   library(edgeR)
   library(pheatmap)
   library(limma)
   library(ggplot2)
   library(ggrepel)
-  library(plotly)
+  library(ggiraph)
   library(htmlwidgets)
   library(viridis)
   library(dplyr)
@@ -161,9 +161,12 @@ results <- topTags(qlf, n = nrow(dge$counts))$table
 write.csv(results, file = results_csv, row.names = TRUE)
 cat(sprintf("\nedgeR results written to: %s\n", results_csv))
 
-# --------- Volcano using ggplot2 + ggrepel + plotly (replaces EnhancedVolcano) ---------
+# --------- Volcano using ggplot2 + ggrepel + ggiraph (replaces plotly) ---------
 # Prepare results for plotting
-res_plot <- results %>%
+results_df <- as.data.frame(results)
+results_df$Gene <- rownames(results_df)
+
+res_plot <- results_df %>%
   dplyr::mutate(negLogP = -log10(pmax(PValue, .Machine$double.xmin)),
                 absLogFC = abs(logFC),
                 signif = "NS") %>%
@@ -178,9 +181,9 @@ res_plot <- results %>%
 volcano_colors <- c("NS" = "grey30", "Log2FC" = "royalblue", "P" = "forestgreen", "P & Log2FC" = "red3")
 
 # Which genes to label: order by FDR then by abs(logFC)
-label_genes <- rownames(res_plot %>% arrange(FDR, desc(absLogFC)) %>% head(volcano_top_n_labels))
+label_genes <- res_plot %>% arrange(FDR, desc(absLogFC)) %>% head(volcano_top_n_labels) %>% pull(Gene)
 
-# Static ggplot2 volcano
+# Static ggplot2 volcano (PNG)
 p_volcano <- ggplot(res_plot, aes(x = logFC, y = negLogP, color = signif)) +
   geom_point(alpha = 0.6, size = 1.8) +
   scale_color_manual(values = volcano_colors) +
@@ -191,18 +194,50 @@ p_volcano <- ggplot(res_plot, aes(x = logFC, y = negLogP, color = signif)) +
        subtitle = paste0("P cutoff = ", volcano_pCutoff, "; |log2FC| cutoff = ", volcano_FCcutoff),
        x = "log2 Fold Change", y = "-log10(P-value)", color = "") +
   theme(legend.position = "right") +
-  geom_text_repel(data = res_plot[rownames(res_plot) %in% label_genes, , drop = FALSE],
-                  aes(label = rownames(res_plot)[rownames(res_plot) %in% label_genes]),
+  geom_text_repel(data = res_plot %>% filter(Gene %in% label_genes),
+                  aes(label = Gene),
                   size = 3, max.overlaps = 20)
 
 png(file.path(outdir, "00_volcano_ggplot.png"), width = 1600, height = 1200)
 print(p_volcano)
 dev.off()
 
-# Interactive volcano via plotly, saved as standalone HTML
-p_volcano_int <- ggplotly(p_volcano, tooltip = c("x", "y")) %>%
-  layout(title = list(text = paste0("Interactive volcano: ", contrast_str)))
-htmlwidgets::saveWidget(p_volcano_int, file = file.path(outdir, "00_volcano_interactive.html"), selfcontained = TRUE)
+# Interactive volcano via ggiraph, saved as standalone HTML
+# Add tooltip text
+res_plot <- res_plot %>%
+  dplyr::mutate(tooltip = paste0(Gene, "\nlogFC=", signif(logFC, 3),
+                                 "\nP=", signif(PValue, 3),
+                                 "\nFDR=", signif(FDR, 3)))
+
+# interactive ggplot: use geom_point_interactive and geom_text_interactive for labeled genes
+p_volcano_int <- ggplot(res_plot, aes(x = logFC, y = negLogP, color = signif)) +
+  ggiraph::geom_point_interactive(aes(tooltip = tooltip, data_id = Gene), alpha = 0.7, size = 2) +
+  scale_color_manual(values = volcano_colors) +
+  geom_vline(xintercept = c(-volcano_FCcutoff, volcano_FCcutoff), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(volcano_pCutoff), linetype = "dashed", color = "black") +
+  theme_minimal() +
+  labs(title = paste("Interactive Volcano:", contrast_str),
+       subtitle = paste0("P cutoff = ", volcano_pCutoff, "; |log2FC| cutoff = ", volcano_FCcutoff),
+       x = "log2 Fold Change", y = "-log10(P-value)", color = "") +
+  theme(legend.position = "right")
+
+# add interactive labels for the top genes
+label_df <- res_plot %>% filter(Gene %in% label_genes)
+if (nrow(label_df) > 0) {
+  p_volcano_int <- p_volcano_int +
+    ggiraph::geom_text_interactive(data = label_df,
+                                   aes(label = Gene, tooltip = tooltip, data_id = Gene),
+                                   size = 3,
+                                   vjust = -1)
+}
+
+girafe_obj <- girafe(ggobj = p_volcano_int,
+                     options = list(
+                       opts_tooltip(css = "background-color:white;padding:5px;border:1px solid #333;border-radius:4px;"),
+                       opts_hover(css = "stroke-width:2;")
+                     ))
+
+htmlwidgets::saveWidget(girafe_obj, file = file.path(outdir, "00_volcano_interactive.html"), selfcontained = TRUE)
 
 # --------- QC & Exploratory Plots ---------
 
@@ -294,9 +329,7 @@ hist(results$PValue, breaks=50, col="gray70", border="white",
      main="Histogram of raw p-values", xlab="P-value")
 dev.off()
 
-# 5) Volcano (parameterized) saved earlier as 00_volcano_ggplot.png and interactive HTML
-
-# Top genes heatmap
+# 5) Top genes heatmap
 top_genes <- rownames(results[order(results$FDR), ])[1:min(top_n_heatmap, nrow(results))]
 mat <- logCPM[top_genes, ]
 mat_scaled <- t(scale(t(mat)))
