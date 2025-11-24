@@ -2,7 +2,10 @@
 # edgeR full analysis + QC plots (pre- and post-normalization)
 # Author: Shashanka Puranika K
 # Date: 24-11-2025
-# Changes: removed highcharter; produce QC/exploratory plots both BEFORE and AFTER normalization.
+# Changes:
+#  - fixed blocky smoothScatter by increasing grid and PNG resolution
+#  - removed use of limma::decideTestsD on glmQLFTest object; MD plot now uses FDR-based status
+#  - small safety checks to avoid 'plot.new has not been called yet' errors
 #############################################
 
 # --------- Config ---------
@@ -22,6 +25,7 @@ use_voom <- FALSE
 volcano_pCutoff <- 0.05
 volcano_FCcutoff <- 1
 volcano_top_n_labels <- 10   # number of genes to label on the static volcano
+fdr_cutoff <- 0.05          # FDR threshold used for highlighting MD/Smear plots
 
 # --------- Helpers ---------
 install_if_missing <- function(pkgs) {
@@ -32,12 +36,12 @@ install_if_missing <- function(pkgs) {
   }
 }
 
-# Install/load packages (no highcharter/plotly/ggiraph)
+# Install/load packages
 install_if_missing(c("edgeR", "pheatmap", "limma", "ggplot2", "ggrepel", "viridis", "dplyr"))
 suppressPackageStartupMessages({
   library(edgeR)
   library(pheatmap)
-  library(limma)
+  library(limma)     # used for voom if requested and some plotting helpers
   library(ggplot2)
   library(ggrepel)
   library(viridis)
@@ -169,10 +173,19 @@ dev.off()
 # 7) Mean–variance trend (pre)
 meanCPM_pre <- rowMeans(cpm(pre_dge, log=FALSE, normalized.lib.sizes = FALSE))
 varCPM_pre  <- apply(cpm(pre_dge, log=FALSE, normalized.lib.sizes = FALSE), 1, var)
-png(file.path(outdir, "pre_07_mean_variance_trend_CPM.png"), width = 1200, height = 900)
+
+# --- Updated smoothScatter: increase nbin and PNG resolution to avoid blockiness ---
+png(file.path(outdir, "pre_07_mean_variance_trend_CPM.png"), width = 2400, height = 1800, res = 150)
 smoothScatter(log10(meanCPM_pre + 1), log10(varCPM_pre + 1),
+              nbin = c(512, 512),
+              colramp = colorRampPalette(c("white", "lightblue", "skyblue", "dodgerblue", "navy")),
+              nrpoints = 0,
               xlab="log10(mean CPM + 1)", ylab="log10(variance CPM + 1)",
               main="Pre-normalization: Mean–variance trend (CPM)")
+set.seed(1)
+samp_idx <- sample.int(length(meanCPM_pre), size = min(5000, length(meanCPM_pre)))
+points(log10(meanCPM_pre[samp_idx] + 1), log10(varCPM_pre[samp_idx] + 1),
+       pch = 20, cex = 0.45, col = rgb(0,0,0,0.25))
 dev.off()
 
 # --------- NORMALIZATION ---------
@@ -266,10 +279,19 @@ dev.off()
 # 7) Mean–variance trend (post)
 meanCPM_post <- rowMeans(cpm(dge, log=FALSE, normalized.lib.sizes = TRUE))
 varCPM_post  <- apply(cpm(dge, log=FALSE, normalized.lib.sizes = TRUE), 1, var)
-png(file.path(outdir, "post_07_mean_variance_trend_CPM.png"), width = 1200, height = 900)
+
+# --- Updated smoothScatter for post-normalization as well ---
+png(file.path(outdir, "post_07_mean_variance_trend_CPM.png"), width = 2400, height = 1800, res = 150)
 smoothScatter(log10(meanCPM_post + 1), log10(varCPM_post + 1),
+              nbin = c(512, 512),
+              colramp = colorRampPalette(c("white", "lightblue", "skyblue", "dodgerblue", "navy")),
+              nrpoints = 0,
               xlab="log10(mean CPM + 1)", ylab="log10(variance CPM + 1)",
               main="Post-normalization: Mean–variance trend (normalized CPM)")
+set.seed(1)
+samp_idx2 <- sample.int(length(meanCPM_post), size = min(5000, length(meanCPM_post)))
+points(log10(meanCPM_post[samp_idx2] + 1), log10(varCPM_post[samp_idx2] + 1),
+       pch = 20, cex = 0.45, col = rgb(0,0,0,0.25))
 dev.off()
 
 # --------- edgeR differential testing (after normalization) ---------
@@ -322,11 +344,32 @@ png(file.path(outdir, "post_08_volcano_ggplot.png"), width = 1600, height = 1200
 print(p_volcano_post)
 dev.off()
 
-# MD plot
+# MD plot (post)
+# Instead of decideTestsD (which may not take glmQLFTest objects), build a logical status vector
+# using the FDR from the topTags results and pass it to plotMD.
+md_status <- NULL
+if (!is.null(results$FDR)) {
+  md_status <- results$FDR < fdr_cutoff
+  # ensure the status vector is named and matches the qlf table order if possible
+  names(md_status) <- rownames(results)
+}
+
 png(file.path(outdir, "post_09_MD_plot.png"), width = 1200, height = 900)
-plotMD(qlf, status = decideTestsD(qlf), column=1, cex=0.6,
-       main="Post-normalization: MD plot (contrast)", xlab="Average logCPM", ylab="LogFC")
-abline(h = 0, col = "gray40", lty = 2)
+# Use tryCatch so that abline is only called if plotting succeeded.
+tryCatch({
+  # plotMD will highlight points where md_status is TRUE
+  if (!is.null(md_status)) {
+    # pass the logical status (named) to highlight significant genes
+    plotMD(qlf, status = md_status, column = 1, cex = 0.6,
+           main = "Post-normalization: MD plot (contrast)", xlab = "Average logCPM", ylab = "LogFC")
+  } else {
+    plotMD(qlf, column = 1, cex = 0.6,
+           main = "Post-normalization: MD plot (contrast)", xlab = "Average logCPM", ylab = "LogFC")
+  }
+  abline(h = 0, col = "gray40", lty = 2)
+}, error = function(e) {
+  message("MD plot failed: ", e$message)
+})
 dev.off()
 
 # MA plot (post)
@@ -339,7 +382,10 @@ dev.off()
 
 # plotSmear (post)
 png(file.path(outdir, "post_11_smear_plot.png"), width = 1200, height = 900)
-plotSmear(qlf, de.tags = rownames(results)[results$FDR < 0.05])
+# highlight de.tags using FDR threshold
+de_tags <- rownames(results)[results$FDR < fdr_cutoff]
+if (length(de_tags) == 0) de_tags <- NULL
+plotSmear(qlf, de.tags = de_tags)
 abline(h = c(-1, 1), col = "blue")
 dev.off()
 
@@ -383,4 +429,3 @@ cat(sprintf("\nAll plots saved in: %s\nBrowse via: %s\n", outdir, html_file))
 #############################################
 # End of script
 #############################################
-
