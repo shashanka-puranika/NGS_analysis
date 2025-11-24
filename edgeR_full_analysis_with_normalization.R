@@ -2,7 +2,7 @@
 # edgeR full analysis + QC plots using design.txt
 # Author: Shashanka Puranika K
 # Date: 24-11-2025
-# Modifications: added explicit normalization options and outputs
+# Modifications: replaced EnhancedVolcano usage with ggplot2/ggrepel/plotly volcano plotting
 #############################################
 
 # --------- Config ---------
@@ -18,6 +18,11 @@ top_n_heatmap <- 50                             # top DE genes in heatmap
 norm_method <- "TMM"
 use_voom <- FALSE
 
+# Volcano plot parameters
+volcano_pCutoff <- 0.05
+volcano_FCcutoff <- 1
+volcano_top_n_labels <- 10   # number of genes to label on the static volcano
+
 # --------- Helpers ---------
 install_if_missing <- function(pkgs) {
   to_install <- pkgs[!pkgs %in% installed.packages()[, "Package"]]
@@ -28,12 +33,17 @@ install_if_missing <- function(pkgs) {
 }
 
 # Install/load packages
-install_if_missing(c("edgeR", "EnhancedVolcano", "pheatmap", "limma"))
+install_if_missing(c("edgeR", "pheatmap", "limma", "ggplot2", "ggrepel", "plotly", "htmlwidgets", "viridis", "dplyr"))
 suppressPackageStartupMessages({
   library(edgeR)
-  library(EnhancedVolcano)
   library(pheatmap)
   library(limma)
+  library(ggplot2)
+  library(ggrepel)
+  library(plotly)
+  library(htmlwidgets)
+  library(viridis)
+  library(dplyr)
 })
 
 # --------- I/O checks ---------
@@ -151,13 +161,48 @@ results <- topTags(qlf, n = nrow(dge$counts))$table
 write.csv(results, file = results_csv, row.names = TRUE)
 cat(sprintf("\nedgeR results written to: %s\n", results_csv))
 
-# --------- Volcano (default) ---------
-png(file.path(outdir, "00_volcano_default.png"), width = 1600, height = 1200)
-EnhancedVolcano(results,
-                lab = rownames(results),
-                x = 'logFC',
-                y = 'PValue')
+# --------- Volcano using ggplot2 + ggrepel + plotly (replaces EnhancedVolcano) ---------
+# Prepare results for plotting
+res_plot <- results %>%
+  dplyr::mutate(negLogP = -log10(pmax(PValue, .Machine$double.xmin)),
+                absLogFC = abs(logFC),
+                signif = "NS") %>%
+  dplyr::mutate(signif = dplyr::case_when(
+    absLogFC >= volcano_FCcutoff & PValue < volcano_pCutoff ~ "P & Log2FC",
+    PValue < volcano_pCutoff ~ "P",
+    absLogFC >= volcano_FCcutoff ~ "Log2FC",
+    TRUE ~ "NS"
+  ))
+
+# Color mapping
+volcano_colors <- c("NS" = "grey30", "Log2FC" = "royalblue", "P" = "forestgreen", "P & Log2FC" = "red3")
+
+# Which genes to label: order by FDR then by abs(logFC)
+label_genes <- rownames(res_plot %>% arrange(FDR, desc(absLogFC)) %>% head(volcano_top_n_labels))
+
+# Static ggplot2 volcano
+p_volcano <- ggplot(res_plot, aes(x = logFC, y = negLogP, color = signif)) +
+  geom_point(alpha = 0.6, size = 1.8) +
+  scale_color_manual(values = volcano_colors) +
+  geom_vline(xintercept = c(-volcano_FCcutoff, volcano_FCcutoff), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(volcano_pCutoff), linetype = "dashed", color = "black") +
+  theme_minimal() +
+  labs(title = paste("Volcano plot:", contrast_str),
+       subtitle = paste0("P cutoff = ", volcano_pCutoff, "; |log2FC| cutoff = ", volcano_FCcutoff),
+       x = "log2 Fold Change", y = "-log10(P-value)", color = "") +
+  theme(legend.position = "right") +
+  geom_text_repel(data = res_plot[rownames(res_plot) %in% label_genes, , drop = FALSE],
+                  aes(label = rownames(res_plot)[rownames(res_plot) %in% label_genes]),
+                  size = 3, max.overlaps = 20)
+
+png(file.path(outdir, "00_volcano_ggplot.png"), width = 1600, height = 1200)
+print(p_volcano)
 dev.off()
+
+# Interactive volcano via plotly, saved as standalone HTML
+p_volcano_int <- ggplotly(p_volcano, tooltip = c("x", "y")) %>%
+  layout(title = list(text = paste0("Interactive volcano: ", contrast_str)))
+htmlwidgets::saveWidget(p_volcano_int, file = file.path(outdir, "00_volcano_interactive.html"), selfcontained = TRUE)
 
 # --------- QC & Exploratory Plots ---------
 
@@ -249,23 +294,9 @@ hist(results$PValue, breaks=50, col="gray70", border="white",
      main="Histogram of raw p-values", xlab="P-value")
 dev.off()
 
-# 5) Volcano (parameterized) & top genes heatmap
-png(file.path(outdir, "13_volcano_tuned.png"), width = 1600, height = 1200)
-EnhancedVolcano(results,
-                lab = rownames(results),
-                x = 'logFC',
-                y = 'PValue',
-                pCutoff = 0.05,
-                FCcutoff = 1,                # |log2FC| >= 1
-                pointSize = 2.0,
-                labSize = 3.0,
-                legendPosition = 'right',
-                legendLabels = c('NS','Log2FC','P','P & Log2FC'),
-                title = 'edgeR contrast',
-                subtitle = contrast_str,
-                col = c('grey30', 'royalblue', 'forestgreen', 'red3'))
-dev.off()
+# 5) Volcano (parameterized) saved earlier as 00_volcano_ggplot.png and interactive HTML
 
+# Top genes heatmap
 top_genes <- rownames(results[order(results$FDR), ])[1:min(top_n_heatmap, nrow(results))]
 mat <- logCPM[top_genes, ]
 mat_scaled <- t(scale(t(mat)))
@@ -295,9 +326,15 @@ html_file <- file.path(outdir, "index.html")
 sink(html_file)
 cat("<html><head><title>edgeR QC & DE plots</title></head><body>\n")
 cat("<h1>edgeR QC & DE plots</h1>\n")
-for (f in list.files(outdir, pattern="\\.png$", full.names = TRUE)) {
-  cat(sprintf("<div>%s<p>%s</p></div>\n",
-              basename(f), basename(f)))
+# include PNGs and HTML interactive plots
+files_to_show <- list.files(outdir, pattern="\\.(png|html)$", full.names = TRUE)
+for (f in files_to_show) {
+  fname <- basename(f)
+  if (grepl("\\.png$", f)) {
+    cat(sprintf("<div><h3>%s</h3><img src=\"%s\" style=\"max-width:100%%;height:auto;\"></div>\n", fname, fname))
+  } else {
+    cat(sprintf("<div><h3>%s</h3><a href=\"%s\">Open interactive plot</a></div>\n", fname, fname))
+  }
 }
 cat("</body></html>\n")
 sink()
