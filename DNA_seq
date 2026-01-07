@@ -1,0 +1,13 @@
+
+REF=data/dna_seq/reference/ref.fa
+R1=data/dna_seq/fastq/sample_R1.fastq
+R2=data/dna_seq/fastq/sample_R2.fastq
+OUT=results/dna_seq
+mkdir -p $OUT
+
+bwa index $REF
+bwa mem $REF $R1 $R2 | samtools sort -o $OUT/sample.bam
+samtools index $OUT/sample.bam
+
+bcftools mpileup -f $REF $OUT/sample.bam | bcftools call -mv -Oz -o $OUT/sample.vcf.gz
+
