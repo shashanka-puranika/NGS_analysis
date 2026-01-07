@@ -1,0 +1,240 @@
+#Create Directory Structure
+mkdir -p rnaseq_analysis/{raw_data,qc/{pre_trim,post_trim},trimmed,reference,alignment/{SAM,BAM},counts,results}
+
+#Export Your Paths
+export FASTQC_PRE=/home/manju/rnaseq_analysis/qc/pre_trim
+export FASTQC_POST=/home/manju/rnaseq_analysis/qc/post_trim
+
+export TRIMMED=/home/manju/rnaseq_analysis/trimmed
+
+export ALIGN=/home/manju/rnaseq_analysis/alignment
+export SAM=/home/manju/rnaseq_analysis/alignment/SAM
+export BAM=/home/manju/rnaseq_analysis/alignment/BAM
+
+export COUNTS=/home/manju/rnaseq_analysis/counts
+export REFERENCE=/home/manju/rnaseq_analysis/reference
+export RESULTS=/home/manju/rnaseq_analysis/results
+
+#Download Raw Data (In raw_data directory)
+Control samples
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/003/SRR4420293/SRR4420293_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/003/SRR4420293/SRR4420293_2.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/004/SRR4420294/SRR4420294_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/004/SRR4420294/SRR4420294_2.fastq.gz
+
+Test samples
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/007/SRR4420297/SRR4420297_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/007/SRR4420297/SRR4420297_2.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/008/SRR4420298/SRR4420298_1.fastq.gz
+wget http://ftp.sra.ebi.ac.uk/vol1/fastq/SRR442/008/SRR4420298/SRR4420298_2.fastq.gz
+
+#Download Reference Genome & Annotation ( In reference directory)
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/735/GCF_000001735.4_TAIR10.1/GCF_000001735.4_TAIR10.1_genomic.fna.gz
+gunzip GCF_000001735.4_TAIR10.1_genomic.fna.gz
+
+# Download annotation file (GFF format)
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/735/GCF_000001735.4_TAIR10.1/GCF_000001735.4_TAIR10.1_genomic.gff.gz
+
+# Decompress files
+gunzip GCF_000001735.4_TAIR10.1_genomic.fna.gz
+gunzip GCF_000001735.4_TAIR10.1_genomic.gff.gz
+
+#Convert GFF to GTF Format
+cd reference
+
+# Install gffread if not available
+# conda install -c bioconda gffread
+# OR: brew install gffread
+# OR: compile from https://github.com/gpertea/gffread
+
+# Convert GFF3 to GTF format
+gffread GCF_000001735.4_TAIR10.1_genomic.gff -T -o GCF_000001735.4_TAIR10.1_genomic.gtf
+
+# Verify the conversion
+echo "Lines in original GFF file:"
+wc -l GCF_000001735.4_TAIR10.1_genomic.gff
+echo "Lines in converted GTF file:"
+wc -l GCF_000001735.4_TAIR10.1_genomic.gtf
+
+# Check for problematic characters
+echo "Checking for '?' in GFF file:"
+grep -c '?' GCF_000001735.4_TAIR10.1_genomic.gff || echo "No '?' found"
+echo "Checking for '?' in GTF file:"
+grep -c '?' GCF_000001735.4_TAIR10.1_genomic.gtf || echo "No '?' found"
+
+cd ..
+
+OR
+
+#Download Pre-converted GTF from Ensembl
+wget https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/735/GCF_000001735.4_TAIR10.1/GCF_000001735.4_TAIR10.1_genomic.gtf.gz
+
+#FastQC – Pre-trim QC(In Pre-trim)
+cd ../raw_data
+fastqc *.fastq.gz -o $FASTQC_PRE -t 4
+
+#Generate MultiQC(In pre_trim -> multiqc_report.html)
+cd $FASTQC_PRE
+multiqc .
+cd ../../..
+
+#Trimming (Trimmomatic)->(SRR4420293, SRR4420294, SRR4420297, SRR4420298)
+trimmomatic PE -threads 4 \
+  SRR4420293_1.fastq.gz SRR4420293_2.fastq.gz \
+  ../trimmed/SRR4420293_1_paired.fq.gz ../trimmed/SRR4420293_1_unpaired.fq.gz \
+  ../trimmed/SRR4420293_2_paired.fq.gz ../trimmed/SRR4420293_2_unpaired.fq.gz \
+  ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 \
+  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 \
+  SRR4420294_1.fastq.gz SRR4420294_2.fastq.gz \
+  ../trimmed/SRR4420294_1_paired.fq.gz ../trimmed/SRR4420294_1_unpaired.fq.gz \
+  ../trimmed/SRR4420294_2_paired.fq.gz ../trimmed/SRR4420294_2_unpaired.fq.gz \
+  ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 \
+  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 \
+  SRR4420297_1.fastq.gz SRR4420297_2.fastq.gz \
+  ../trimmed/SRR4420297_1_paired.fq.gz ../trimmed/SRR4420297_1_unpaired.fq.gz \
+  ../trimmed/SRR4420297_2_paired.fq.gz ../trimmed/SRR4420297_2_unpaired.fq.gz \
+  ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 \
+  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+trimmomatic PE -threads 4 \
+  SRR4420298_1.fastq.gz SRR4420298_2.fastq.gz \
+  ../trimmed/SRR4420298_1_paired.fq.gz ../trimmed/SRR4420298_1_unpaired.fq.gz \
+  ../trimmed/SRR4420298_2_paired.fq.gz ../trimmed/SRR4420298_2_unpaired.fq.gz \
+  ILLUMINACLIP:TruSeq3-PE.fa:2:30:10 \
+  LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+
+# Move out after trimming
+cd ..
+
+#Post-trim FastQC(IN qc -> post_trim)
+fastqc $TRIMMED/*_paired.fq.gz -o $FASTQC_POST -t 4
+cd $FASTQC_POST
+multiqc .
+cd ../../..
+
+
+#Build HISAT2 Index (with splice sites + exons) (reference)
+cd $REFERENCE
+hisat2_extract_splice_sites.py GCF_000001735.4_TAIR10.1_genomic.gtf > splice_sites.txt
+hisat2_extract_exons.py GCF_000001735.4_TAIR10.1_genomic.gtf > exons.txt
+
+hisat2-build -p 4 \
+  --ss splice_sites.txt \
+  --exon exons.txt \
+  GCF_000001735.4_TAIR10.1_genomic.fna \
+  arabidopsis_index
+  
+  
+#Alignment with HISAT2
+cd $TRIMMED
+hisat2 -p 4 -x $REFERENCE/arabidopsis_index \
+  --dta \
+  --summary-file $ALIGN/SRR4420293_summary.txt \
+  -1 SRR4420293_1_paired.fq.gz -2 SRR4420293_2_paired.fq.gz \
+  -S $ALIGN/SRR4420293.sam
+
+hisat2 -p 4 -x $REFERENCE/arabidopsis_index \
+  --dta \
+  --summary-file $ALIGN/SRR4420294_summary.txt \
+  -1 SRR4420294_1_paired.fq.gz -2 SRR4420294_2_paired.fq.gz \
+  -S $ALIGN/SRR4420294.sam
+
+hisat2 -p 4 -x $REFERENCE/arabidopsis_index \
+  --dta \
+  --summary-file $ALIGN/SRR4420297_summary.txt \
+  -1 SRR4420297_1_paired.fq.gz -2 SRR4420297_2_paired.fq.gz \
+  -S $ALIGN/SRR4420297.sam
+
+hisat2 -p 4 -x $REFERENCE/arabidopsis_index \
+  --dta \
+  --summary-file $ALIGN/SRR4420298_summary.txt \
+  -1 SRR4420298_1_paired.fq.gz -2 SRR4420298_2_paired.fq.gz \
+  -S $ALIGN/SRR4420298.sam
+
+
+Convert SAM → Sorted BAM
+cd $ALIGN
+
+samtools sort -@ 4 -o SRR4420293_sorted.bam SRR4420293.sam
+samtools sort -@ 4 -o SRR4420294_sorted.bam SRR4420294.sam
+samtools sort -@ 4 -o SRR4420297_sorted.bam SRR4420297.sam
+samtools sort -@ 4 -o SRR4420298_sorted.bam SRR4420298.sam
+
+#Index  BAM files
+samtools index SRR4420293_sorted.bam
+samtools index SRR4420294_sorted.bam
+samtools index SRR4420297_sorted.bam
+samtools index SRR4420298_sorted.bam
+
+#Remove SAM files to save space
+rm SRR4420293.sam
+rm SRR4420294.sam
+rm SRR4420297.sam
+rm SRR4420298.sam
+
+                              OR
+#Convert SAM → BAM → Sorted BAM → Index → Remove old files
+cd alignment
+
+echo "Processing SRR4420293..."
+samtools view -@ 4 -bS SRR4420293.sam > SRR4420293.bam
+samtools sort -@ 4 SRR4420293.bam -o SRR4420293_sorted.bam
+samtools index SRR4420293_sorted.bam
+rm SRR4420293.bam SRR4420293.sam
+echo "SRR4420293 processing complete"
+
+
+echo "Processing SRR4420294..."
+samtools view -@ 4 -bS SRR4420294.sam > SRR4420294.bam
+samtools sort -@ 4 SRR4420294.bam -o SRR4420294_sorted.bam
+samtools index SRR4420294_sorted.bam
+rm SRR4420294.bam SRR4420294.sam
+echo "SRR4420294 processing complete"
+
+
+echo "Processing SRR4420297..."
+samtools view -@ 4 -bS SRR4420297.sam > SRR4420297.bam
+samtools sort -@ 4 SRR4420297.bam -o SRR4420297_sorted.bam
+samtools index SRR4420297_sorted.bam
+rm SRR4420297.bam SRR4420297.sam
+echo "SRR4420297 processing complete"
+
+
+echo "Processing SRR4420298..."
+samtools view -@ 4 -bS SRR4420298.sam > SRR4420298.bam
+samtools sort -@ 4 SRR4420298.bam -o SRR4420298_sorted.bam
+samtools index SRR4420298_sorted.bam
+rm SRR4420298.bam SRR4420298.sam
+echo "SRR4420298 processing complete"
+
+cd ..
+
+
+#Alignment Quality(output->Alignment)
+
+for sample in SRR4420293 SRR4420294 SRR4420297 SRR4420298
+do
+  samtools flagstat ${sample}_sorted.bam > ${sample}_stats.txt
+  samtools idxstats ${sample}_sorted.bam > ${sample}_idxstats.txt
+done
+
+multiqc .
+cd ..
+
+#Read Counting (featureCounts) (Output -> counts)
+cd $ALIGN
+
+featureCounts -T 4 -p -t exon -g gene_id \
+  -a $REFERENCE/GCF_000001735.4_TAIR10.1_genomic.gtf \
+  -o $COUNTS/gene_counts.txt \
+  SRR4420293_sorted.bam \
+  SRR4420294_sorted.bam \
+  SRR4420297_sorted.bam \
+  SRR4420298_sorted.bam
+
+cd $COUNTS
+head gene_counts.txt.summary
